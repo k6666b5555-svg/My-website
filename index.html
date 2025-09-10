@@ -1,0 +1,238 @@
+
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>منصة سوبر عربي</title>
+<style>
+body {font-family: Arial, sans-serif; direction: rtl; background: #f0f4f8; margin: 0; padding: 0;}
+header {background: #0077cc; color: white; padding: 20px; text-align: center; font-size: 24px;}
+.container {max-width: 1000px; margin: 20px auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 0 10px rgba(0,0,0,0.1);}
+h2 {color: #0077cc;}
+input, select, textarea, button {width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; border: 1px solid #ccc;}
+button {background: #0077cc; color: white; border: none; cursor: pointer; font-size: 16px;}
+button:hover {background: #005fa3;}
+.course {border: 1px solid #0077cc; margin: 10px 0; padding: 10px; border-radius: 8px;}
+.success {color: green; font-weight: bold;}
+.error {color: red; font-weight: bold;}
+.hidden {display: none;}
+</style>
+</head>
+<body>
+
+<header>منصة سوبر عربي</header>
+
+<div class="container" id="authContainer">
+<h2>تسجيل / تسجيل دخول</h2>
+<label>البريد الإلكتروني:</label>
+<input type="email" id="email" placeholder="ادخل بريدك الإلكتروني">
+<label>كلمة المرور:</label>
+<input type="password" id="password" placeholder="ادخل كلمة المرور">
+<button onclick="login()">تسجيل دخول</button>
+<button onclick="register()">تسجيل جديد</button>
+<p id="authMessage"></p>
+</div>
+
+<div class="container hidden" id="adminContainer">
+<h2>لوحة الأدمن</h2>
+<label>اسم الكورس:</label>
+<input type="text" id="courseName" placeholder="ادخل اسم الكورس">
+<label>سعر الكورس:</label>
+<input type="number" id="coursePrice" placeholder="ادخل سعر الكورس">
+<label>صورة الكورس:</label>
+<input type="file" id="courseImage">
+<label>ملف PDF للكورس:</label>
+<input type="file" id="coursePDF">
+<label>فيديو الشرح:</label>
+<input type="file" id="courseVideo">
+<button onclick="addCourse()">إضافة الكورس</button>
+<p id="adminMessage"></p>
+<h3>الكورسات الحالية</h3>
+<div id="coursesList"></div>
+<button onclick="logout()">تسجيل خروج</button>
+</div>
+
+<div class="container hidden" id="studentContainer">
+<h2>مرحباً <span id="studentName"></span></h2>
+<h3>الكورسات المتاحة لك</h3>
+<div id="studentCourses"></div>
+<p>ادخل رقم عملية الدفع (Vodafone Cash) لتأكيد الاشتراك:</p>
+<input type="text" id="studentPayment" placeholder="مثال: 01017365486">
+<button onclick="saveStudentPayment()">تأكيد الاشتراك</button>
+<p id="studentMessage"></p>
+<button onclick="logout()">تسجيل خروج</button>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.1.0/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.1.0/firebase-analytics.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.1.0/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.1.0/firebase-firestore.js";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.1.0/firebase-storage.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB1OEsxz3HNnQzwzxNMq2J5dxXMWk3RtiY",
+  authDomain: "arab-platform-789a0.firebaseapp.com",
+  projectId: "arab-platform-789a0",
+  storageBucket: "arab-platform-789a0.firebasestorage.app",
+  messagingSenderId: "573093214358",
+  appId: "1:573093214358:web:917719912f6df98eadeab7",
+  measurementId: "G-VLKEBMM8E8"
+};
+
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+const authMessage = document.getElementById('authMessage');
+const adminContainer = document.getElementById('adminContainer');
+const studentContainer = document.getElementById('studentContainer');
+const authContainer = document.getElementById('authContainer');
+const studentNameEl = document.getElementById('studentName');
+
+const ADMIN_EMAIL = "admin@almasry.com";
+
+async function register() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    authMessage.textContent = "";
+    if(!email || !password){ authMessage.textContent="الرجاء ملء جميع الحقول"; return; }
+    try {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        if(user.email === ADMIN_EMAIL){
+            alert("هذا البريد مخصص للأدمن فقط.");
+            return;
+        }
+        await setDoc(doc(db, "students", user.uid), {email: email, payment: "", courses: []});
+        authMessage.textContent="تم التسجيل بنجاح!";
+        showStudent(user);
+    } catch(error){ authMessage.textContent=error.message; }
+}
+
+async function login() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    authMessage.textContent="";
+    if(!email || !password){ authMessage.textContent="الرجاء ملء جميع الحقول"; return; }
+    try {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        if(user.email === ADMIN_EMAIL){
+            showAdmin(user);
+        } else {
+            showStudent(user);
+        }
+    } catch(error){ authMessage.textContent=error.message; }
+}
+
+function logout(){
+    signOut(auth).then(()=>{
+        adminContainer.classList.add('hidden');
+        studentContainer.classList.add('hidden');
+        authContainer.classList.remove('hidden');
+    });
+}
+
+async function showAdmin(user){
+    authContainer.classList.add('hidden');
+    adminContainer.classList.remove('hidden');
+    loadCoursesAdmin();
+}
+
+async function addCourse(){
+    const name = document.getElementById('courseName').value;
+    const price = document.getElementById('coursePrice').value;
+    const imageFile = document.getElementById('courseImage').files[0];
+    const pdfFile = document.getElementById('coursePDF').files[0];
+    const videoFile = document.getElementById('courseVideo').files[0];
+    const adminMessage = document.getElementById('adminMessage');
+    adminMessage.textContent = "";
+
+    if(!name || !price || !imageFile || !pdfFile || !videoFile){
+        adminMessage.textContent="الرجاء ملء جميع الحقول ورفع الملفات.";
+        return;
+    }
+
+    try{
+        const imageRef = ref(storage, 'courses/images/'+imageFile.name);
+        await uploadBytes(imageRef, imageFile);
+        const imageURL = await getDownloadURL(imageRef);
+
+        const pdfRef = ref(storage, 'courses/pdfs/'+pdfFile.name);
+        await uploadBytes(pdfRef, pdfFile);
+        const pdfURL = await getDownloadURL(pdfRef);
+
+        const videoRef = ref(storage, 'courses/videos/'+videoFile.name);
+        await uploadBytes(videoRef, videoFile);
+        const videoURL = await getDownloadURL(videoRef);
+
+        await addDoc(collection(db,'courses'), {name, price, imageURL, pdfURL, videoURL});
+        adminMessage.textContent="تم إضافة الكورس بنجاح!";
+        loadCoursesAdmin();
+    } catch(error){ adminMessage.textContent = error.message; }
+}
+
+async function loadCoursesAdmin(){
+    const list = document.getElementById('coursesList');
+    list.innerHTML="";
+    const querySnapshot = await getDocs(collection(db,'courses'));
+    querySnapshot.forEach(docSnap=>{
+        const data = docSnap.data();
+        const div = document.createElement('div');
+        div.className = 'course';
+        div.innerHTML = `<h4>${data.name} - ${data.price} جنيه</h4>
+        <img src="${data.imageURL}" width="100">
+        <p>PDF: <a href="${data.pdfURL}" target="_blank">تحميل</a></p>
+        <p>فيديو: <a href="${data.videoURL}" target="_blank">مشاهدة</a></p>`;
+        list.appendChild(div);
+    });
+}
+
+async function showStudent(user){
+    authContainer.classList.add('hidden');
+    studentContainer.classList.remove('hidden');
+    studentNameEl.textContent = user.email;
+    loadStudentCourses(user.uid);
+}
+
+async function loadStudentCourses(uid){
+    const coursesDiv = document.getElementById('studentCourses');
+    coursesDiv.innerHTML="";
+    const docRef = doc(db,'students',uid);
+    const docSnap = await getDoc(docRef);
+    let studentData = {};
+    if(docSnap.exists()){
+        studentData = docSnap.data();
+    }
+    const querySnapshot = await getDocs(collection(db,'courses'));
+    querySnapshot.forEach(docSnap=>{
+        const data = docSnap.data();
+        const courseDiv = document.createElement('div');
+        courseDiv.className = 'course';
+        courseDiv.innerHTML = `<h4>${data.name} - ${data.price} جنيه</h4>
+        <img src="${data.imageURL}" width="100">
+        <p>PDF: <a href="${data.pdfURL}" target="_blank">تحميل</a></p>
+        <p>فيديو: <a href="${data.videoURL}" target="_blank">مشاهدة</a></p>`;
+        coursesDiv.appendChild(courseDiv);
+    });
+}
+
+async function saveStudentPayment(){
+    const payment = document.getElementById('studentPayment').value;
+    const user = auth.currentUser;
+    const studentMessage = document.getElementById('studentMessage');
+    studentMessage.textContent="";
+    if(!payment){ studentMessage.textContent="ادخل رقم العملية"; return; }
+    try{
+        await setDoc(doc(db,'students',user.uid), {email: user.email, payment, courses: []});
+        studentMessage.textContent="تم تأكيد الاشتراك بنجاح!";
+    } catch(error){ studentMessage.textContent = error.message; }
+}
+</script>
+
+</body>
+</html>
